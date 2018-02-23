@@ -1,7 +1,7 @@
-#include <EEPROM.h>
+//#include <EEPROM.h>
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
-#include <Wire.h>
+//#include <Wire.h>
 //#include <Adafruit_INA219.h>
 #include <Servo.h>
  
@@ -9,14 +9,54 @@
 const char* ssid = "";
 const char* password = "";
 const char* mqtt_server = "192.168.42.98";
-const char* topic_state = "home-assistant/cover/bedroom_blinds/state";
+const char* topic_state_blinds = "home-assistant/cover/bedroom_blinds/state";
+const char* topic_state_motion = "home-assistant/sensor/bedroom";
 const char* state_open = "1";
 const char* state_closed = "0";
+const char* state_on = "1";
+const char* state_off = "0";
+
+int inputPin = 12;             // choose the input pin (for PIR sensor)
+int pirState = LOW;           // we start, assuming no motion detected
+int val = 0;
  
 WiFiClient espClient;
 PubSubClient client(espClient);
 
 Servo servo;
+
+void setup() {
+  Serial.begin(115200);                   //Connect to Serial Port
+  while(! Serial);                        //Wait until we are connected to Serial Port
+  Serial.println();
+  
+  servo.attach(2);                        //Attach Servo to Channel Pin and set to Zero position
+  servo.write(90);                        //Set Servo to Zero position
+
+  //Connect to Wifi
+  delay(10);
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+
+  client.setServer(mqtt_server, 1883);
+  client.setCallback(callback);
+  
+  pinMode(inputPin, INPUT);     // declare sensor pin as input
+
+}
  
 void callback(char* topic, byte* payload, unsigned int length) {
  Serial.print("Message arrived [");
@@ -28,10 +68,10 @@ void callback(char* topic, byte* payload, unsigned int length) {
   
   if (receivedChar == '0'){
     servo.write(172);
-    client.publish(topic_state,state_closed);}
+    client.publish(topic_state_blinds,state_closed);}
   if (receivedChar == '1'){
     servo.write(0);
-    client.publish(topic_state,state_open);}
+    client.publish(topic_state_blinds,state_open);}
   }
   Serial.println();
 }
@@ -57,30 +97,32 @@ void reconnect() {
  }
 }
 
-void setup() {
-  //Connect to Serial Port
-  Serial.begin(115200);
-  //Wait until we are connected to Serial Port
-  while(! Serial);
-  //Attach Servo to Channel Pin and set to Zero position
-  servo.attach(2);
-  //servo.write(90);
-
-  Serial.println();
-  client.setServer(mqtt_server, 1883);
-  client.setCallback(callback);
-
-}
  
-void loop()
-{
+void loop(){
  if (!client.connected()) {
-  reconnect();
- }
+    reconnect();
+    }
+    val = digitalRead(inputPin);                      // read input value
+    if (val == 1) {                                // check if the input is HIGH
+      if (pirState == LOW) {
+        // we have just turned on
+        Serial.println("Motion detected!");
+        client.publish(topic_state_motion, state_on);
+        // We only want to print on the output change, not state
+        pirState = HIGH;
+      }
+    } else {
+      if (pirState == HIGH){
+        // we have just turned of
+        Serial.println("Motion ended!");
+        client.publish(topic_state_motion, state_off);
+        // We only want to print on the output change, not state
+        pirState = LOW;
+      }
+    }
  client.loop();
  
  //Constantly poll for state and publish
 // if(servo.read() == '90'); { client.publish(topic_state,state_open);} //is this too expensive to do?
 // if(servo.read() != '90') { client.publish(topic_state,state_closed);}
 }
-
